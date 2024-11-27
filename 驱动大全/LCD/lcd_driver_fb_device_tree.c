@@ -115,6 +115,9 @@ struct imx6ull_lcdif {
   volatile unsigned int SYNC_DELAY;                      
 } ;
 
+static struct imx6ull_lcdif *lcdif;
+
+
 /* 使能lcdif控制器 */
 static void lcd_controller_enable(struct imx6ull_lcdif *lcdif)
 {
@@ -307,25 +310,24 @@ static struct fb_ops myLCD_ops = {
 int myLCD_probe(struct platform_device *pdev)
 {
 	struct resource *res;
-	struct pinctrl *pinctrl;
 	struct device_node *display_np;
 	dma_addr_t phy_addr;
 	struct display_timings *timings = NULL;//所有的显示时序
 	struct display_timing *dt = NULL;//当前使用的显示时序
 	unsigned int bits_per_pixel;
-	unsigned int bus_width;
-	struct imx6ull_lcdif *lcdif;
+	unsigned int bus_width = 0;
+	
 
 	
 	/* 从设备树中获取gpio信息 配置gpio为输出*/
-	bl_gpio = gpiod_get(pdev->dev, "backlight", GPIOD_OUT_HIGH);
-	gpiod_direction_output(bl_gpio, 1)
+	bl_gpio = gpiod_get(&pdev->dev, "backlight", GPIOD_OUT_HIGH);
+	gpiod_direction_output(bl_gpio, 1);
 	
 	/* 将"display"属性做为设备节点指针 */
 	display_np = of_parse_phandle(pdev->dev.of_node, "display", 0);
 	
 	/* 获取通用信息 */
-	of_property_read_u32(display_np, "bits-per-pixel", &bits_per_pixel)
+	of_property_read_u32(display_np, "bits-per-pixel", &bits_per_pixel);
 	of_property_read_u32(display_np, "bus-width", &bus_width);
 	
 	/* 解析设备节点中display_timings项的所有内容 */
@@ -336,7 +338,7 @@ int myLCD_probe(struct platform_device *pdev)
 	clk_pix = devm_clk_get(&pdev->dev, "pix");
 	clk_axi = devm_clk_get(&pdev->dev, "axi");
 	/* 设置LCD像素时钟 */
-	clk_set_rate(clk_pix, dt->pixelclock);
+	clk_set_rate(clk_pix, dt->pixelclock.typ);
 
 	/* 时钟使能 */
 	clk_prepare_enable(clk_axi);
@@ -345,8 +347,8 @@ int myLCD_probe(struct platform_device *pdev)
 	/* 分配fb_info结构体 */
 	fb_info = framebuffer_alloc(0, NULL);
 	/* 1.2 设置fb_info */
-	fb_info->var.xres = fb_info->var.xres_virtual = 500;//x方向分辨率
-	fb_info->var.yres = fb_info->var.yres_virtual = 300;//y方向分辨率
+	fb_info->var.xres = fb_info->var.xres_virtual = dt->hactive.typ;//x方向分辨率
+	fb_info->var.yres = fb_info->var.yres_virtual = dt->vactive.typ;//y方向分辨率
 
 	fb_info->var.bits_per_pixel = 16;//RGB565
 	/* 红色位域 */
@@ -410,7 +412,7 @@ static int myLCD_remove(struct platform_device *pdev)
 	/* 2.2 释放fb_info */
 	framebuffer_release(fb_info);
 
-	iounmap(myLCD_regs);
+	iounmap(lcdif);
 
 	return 0;
 }
@@ -418,8 +420,8 @@ static int myLCD_remove(struct platform_device *pdev)
 
 
 /* lcd节点匹配表 */
-static const struct of_device_id myLCD_of_match = {
-	{.compatible = "100ask, lcd_drv"}
+static const struct of_device_id myLCD_of_match[] = {
+	{.compatible = "100ask, lcd_drv"},
 }
 MODULE_DEVICE_TABLE(of, myLCD_of_match);
 
@@ -428,7 +430,7 @@ static struct platform_driver myLCD_driver = {
 	.remove = myLCD_remove,
 	.driver = {
 		   .name = "myLcd",
-		   .of_match_table = mylcd_of_match,
+		   .of_match_table = myLCD_of_match,
 	},
 };
 
